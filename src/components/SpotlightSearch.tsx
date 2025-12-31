@@ -7,20 +7,16 @@ import { getSearchUrl, openInBrowser } from '@/utils/searchEngine';
 import { SearchInput } from './SearchInput';
 import { SearchResults } from './SearchResults';
 import { SettingsPanel } from './SettingsPanel';
-import { Settings, Command } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface SpotlightSearchProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
+export function SpotlightSearch() {
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('spotlight-settings');
     return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [isFocused, setIsFocused] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   
   const { query, setQuery, results, clearSearch } = useSearch(settings);
@@ -36,19 +32,22 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
         navigator.clipboard.writeText(result.title.replace(/,/g, ''));
         toast.success('Copied to clipboard!');
       } else {
-        // Simulate opening app/file/folder
         toast.success(`Opening ${result.title}...`);
       }
       clearSearch();
-      onClose();
     },
-    [query, settings, clearSearch, onClose]
+    [query, settings, clearSearch]
   );
+
+  const handleClose = useCallback(() => {
+    clearSearch();
+    setIsFocused(false);
+  }, [clearSearch]);
 
   const { selectedIndex, setSelectedIndex, handleKeyDown } = useKeyboardNavigation(
     results,
     handleSelect,
-    onClose
+    handleClose
   );
 
   // Save settings to localStorage
@@ -56,91 +55,70 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
     localStorage.setItem('spotlight-settings', JSON.stringify(settings));
   }, [settings]);
 
-  // Focus input when opened
+  // Focus on mount and when clicking back
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (isFocused && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [isOpen]);
+  }, [isFocused]);
 
-  // Reset on close
+  // Global shortcut to refocus
   useEffect(() => {
-    if (!isOpen) {
-      clearSearch();
-      setShowSettings(false);
-    }
-  }, [isOpen, clearSearch]);
-
-  if (!isOpen) return null;
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if (e.code === 'ControlRight' || (e.ctrlKey && e.code === 'Space')) {
+        e.preventDefault();
+        setIsFocused(true);
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
 
   return (
-    <div className="spotlight-container fade-in">
-      <div 
-        className="absolute inset-0"
-        onClick={onClose}
-      />
-      
-      <div className="spotlight-window scale-in relative z-10">
-        <SearchInput
-          ref={inputRef}
-          value={query}
-          onChange={setQuery}
-          onClear={clearSearch}
-          onKeyDown={handleKeyDown}
-        />
-        
-        <SearchResults
-          results={results}
-          selectedIndex={selectedIndex}
-          onSelect={handleSelect}
-          onHover={setSelectedIndex}
-        />
-
-        {/* Empty state */}
-        {query === '' && (
-          <div className="px-5 py-8 text-center">
-            <Command className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-muted-foreground text-sm">
-              Type to search apps, files, folders
-            </p>
-            <p className="text-muted-foreground/60 text-xs mt-1">
-              Or try a calculation like "2+2*3"
-            </p>
-          </div>
-        )}
-
-        {/* No results */}
-        {query !== '' && results.length === 1 && results[0].type === 'web' && (
-          <div className="px-5 py-6 text-center border-t border-border/30">
-            <p className="text-muted-foreground text-sm">
-              No local results found
-            </p>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border/30 bg-secondary/20">
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 bg-secondary rounded text-[10px]">↑↓</kbd>
-              navigate
-            </span>
-            <span className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 bg-secondary rounded text-[10px]">↵</kbd>
-              open
-            </span>
-            <span className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 bg-secondary rounded text-[10px]">esc</kbd>
-              close
-            </span>
-          </div>
+    <>
+      <div className="spotlight-floating scale-in">
+        <div className="spotlight-bar">
+          <SearchInput
+            ref={inputRef}
+            value={query}
+            onChange={setQuery}
+            onClear={clearSearch}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setIsFocused(true)}
+          />
+          
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+            className="p-2 mr-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
             aria-label="Settings"
           >
             <Settings className="w-4 h-4" />
           </button>
+        </div>
+        
+        {(results.length > 0 || query) && (
+          <div className="spotlight-results">
+            <SearchResults
+              results={results}
+              selectedIndex={selectedIndex}
+              onSelect={handleSelect}
+              onHover={setSelectedIndex}
+            />
+            
+            {query !== '' && results.length === 1 && results[0].type === 'web' && (
+              <div className="px-4 py-3 text-center border-t border-border/30">
+                <p className="text-muted-foreground text-xs">No local results</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Shortcut hint */}
+        <div className="flex items-center justify-center gap-4 py-2 text-[10px] text-muted-foreground/50">
+          <span>↑↓ navigate</span>
+          <span>↵ open</span>
+          <span>esc clear</span>
         </div>
       </div>
 
@@ -151,6 +129,6 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
           onClose={() => setShowSettings(false)}
         />
       )}
-    </div>
+    </>
   );
 }
